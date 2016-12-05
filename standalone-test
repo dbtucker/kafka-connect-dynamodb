@@ -1,0 +1,65 @@
+#!/bin/sh
+#
+# A simple helper script to test out the connector in standalone mode
+# on the local system.
+#
+#	usage: $0 [ Sink | Source | SinkAvro | SourceAvro ]
+#		default is BOTH connectors deployed, enabling a "loop test"
+#		Avro suffix enables the Avro data converter (default is JSON)
+#
+#		NOTE: not all repos will include both Sink and Source
+#
+#	Assumptions :
+#	 - Confluent Platform components are installed and available
+#		at CP_HOME (default /opt/confluent)
+#	 - AWS credentials available (either in users ~/.aws directory
+#		or through editing of config/*properties files.
+#
+
+use_avro=0
+TEST_TYPE=${1}
+if [ "${TEST_TYPE%Avro}" != "${TEST_TYPE}" ] ; then
+	use_avro=1
+	TEST_TYPE="${TEST_TYPE%Avro}"
+fi
+
+READLINK=readlink
+which greadlink &> /dev/null  &&  READLINK=greadlink
+
+THIS_SCRIPT="$(${READLINK} -f ${BASH_SOURCE[0]})"
+DEV_DIR=$(dirname ${THIS_SCRIPT})
+CFG_DIR=${DEV_DIR}/config
+
+CP_HOME=${CP_HOME:-/opt/confluent}
+TARGET_DIR=$(ls -d ${DEV_DIR}/target/kafka-connect-*-package | tail -1)
+export CLASSPATH=${TARGET_DIR}/share/java/kafka-connect-dynamodb/\*
+
+if [ -n "${TEST_TYPE}"  -a  ! -r ${CFG_DIR}/Dynamodb${TEST_TYPE}-quickstart.properties ] ; then
+	echo "ERROR: cannot access ${CFG_DIR}/Dynamodb${TEST_TYPE}-quickstart.properties"
+	echo "Supported types are:"
+	ls ${CFG_DIR}/*-quickstart.properties | \
+		sed "s|${CFG_DIR}/Dynamodb||g" | \
+		sed "s|-quickstart.properties||g" 
+	exit 1
+fi
+
+if [ -f ${CFG_DIR}/dynamodb-log4j.properties ] ; then
+    KAFKA_LOG4J_OPTS="-Dlog4j.configuration=file:${CFG_DIR}/dynamodb-log4j.properties"
+	export KAFKA_LOG4J_OPTS
+fi
+
+if [ "${TEST_TYPE}" == "Sink"  -o  "${TEST_TYPE}" == "Source" ] ; then
+	QS_PROPS=$CFG_DIR/Dynamodb${TEST_TYPE}-quickstart.properties
+else
+	QS_PROPS="$CFG_DIR/DynamodbSink-quickstart.properties ${CFG_DIR}/DynamodbSource-quickstart.properties"
+fi
+
+if [ $use_avro -eq 1 ] ; then
+	SA_PROPS=$CP_HOME/etc/schema-registry/connect-avro-standalone.properties
+else
+	SA_PROPS=$CP_HOME/etc/kafka/connect-standalone.properties
+fi
+
+$CP_HOME/bin/connect-standalone \
+	$SA_PROPS \
+	$QS_PROPS
